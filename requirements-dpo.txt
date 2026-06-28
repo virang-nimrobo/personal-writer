@@ -1,0 +1,7 @@
+# Optional, heavy: the HF+PEFT fallback for the DPO preference stage (mlx_lm has no DPO trainer).
+# Only needed to actually run 10_train_dpo.py --train; dataset-build works without these.
+torch>=2.2
+transformers>=4.44
+datasets>=2.20
+trl>=0.11
+peft>=0.12

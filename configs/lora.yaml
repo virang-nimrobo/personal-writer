@@ -1,0 +1,25 @@
+# Reference config for real (non-smoke) LoRA SFT runs: `python3 -m mlx_lm lora -c configs/lora.yaml`.
+# The smoke path uses scripts/06_train_lora.sh --smoke instead (CLI flags, tiny iters).
+model: "mlx-community/Qwen2.5-3B-Instruct-4bit"
+train: true
+data: "data/synth"
+adapter_path: "out/editor-latest"
+
+# LoRA
+fine_tune_type: lora
+num_layers: 8
+iters: 300
+batch_size: 2
+learning_rate: 1e-5
+max_seq_length: 1024
+
+lora_parameters:
+  rank: 16
+  scale: 20.0
+  dropout: 0.05
+
+# eval cadence
+steps_per_report: 10
+steps_per_eval: 50
+val_batches: 5
+save_every: 100

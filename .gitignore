@@ -1,0 +1,35 @@
+# --- python ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# --- os / editor ---
+.DS_Store
+.env
+
+# --- data (personal content + training corpora — never commit) ---
+data/
+landing_zone/
+gemini/
+backups/
+
+# raw scraped/personal content anywhere in the tree
+**/.raw/
+timeline_*.json
+link_cache.json
+
+# --- model artifacts / training outputs ---
+out/
+*.safetensors
+*.bin
+*.pt
+*.gguf
+*.npy
+
+# --- datasets / dumps ---
+*.jsonl
+*.parquet
+*.sqlite
+*.db

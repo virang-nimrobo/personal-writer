@@ -1,0 +1,9 @@
+# Local Mac (Apple Silicon) fine-tuning + serving
+mlx>=0.18
+mlx-lm>=0.18
+# Reverse-synthesis of drafts + LLM-as-judge eval
+anthropic>=0.40
+# Ranking UI (Phase 3)
+gradio>=4.0
+# Embedding similarity for eval (reconstruction metric)
+sentence-transformers>=3.0
