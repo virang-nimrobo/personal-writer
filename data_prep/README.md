@@ -41,6 +41,17 @@ make import-twitter
 This writes posted tweets into `core/no_draft.jsonl` because the archive contains
 final text but not the rough drafts that led to it.
 
+After running `build_generation.py`, the importer can also create deterministic
+draft output chunks for local bootstrapping:
+
+```bash
+.venv/bin/python data_prep/import_twitter_archive.py \
+  --create-draft-outputs \
+  --generation-date 2026-06-28 \
+  --output-start 0 \
+  --output-end 250
+```
+
 ## The data model
 
 Every training row is `{context, draft, final}`. The `final` is always the real
