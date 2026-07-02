@@ -1,6 +1,8 @@
 # Data Prep
 
-Data Prep is agent-managed. There is no `make data-prep` command.
+Data Prep is agent-managed. There is no broad `make data-prep` command, but the
+Makefile has focused helpers for importing Twitter archives and running
+configured draft-generation models.
 
 The job of this area is to turn raw sources, generated samples, usage logs, and
 human feedback into the unified `landing_zone/triplets.jsonl` training file.
@@ -28,7 +30,8 @@ Any user can build training data from this folder in three steps:
 1. **Build the core set** — curate seeds into `core/` (the durable seed bank).
    See `core/README.md`.
 2. **Build the generation folder** — derive a dated `generation-{date}/` from the
-   core set, where 4 models generate off-voice drafts. See *Draft generation* below.
+   core set, where configured models generate off-voice drafts. See *Draft
+   generation* below.
 3. **Build triplets** — run `build_triplets.py` to merge core seeds + generated
    drafts into the unified `landing_zone/triplets.jsonl`. See *Build triplets* below.
 
@@ -95,39 +98,129 @@ mapping, and worked examples.
 Step 2 reads the core set and builds a dated `generation-{date}/`. Generation's
 job is to **produce off-voice drafts**: a draft for every `no_draft` seed, and
 alternative drafts for every `with_draft` seed. To get diverse, realistic
-off-voice inputs, each seed is run through **4 frontier models** — Codex (GPT-5.5),
-Gemini 3.1, Sonnet, and Opus — each producing its own draft.
+off-voice inputs, each seed can be run through any configured draft model. The
+default folders are Codex, Gemini, Sonnet, and Opus. Local models such as Gemma
+via LM Studio/Ollama, or MLX models via `mlx_lm`, can be added with `--models`.
 
 Context is already resolved in the core set (step 1's job — terse directive with
 real material appended, non-negotiable). Step 2 takes it as-is: it emits generation
 inputs `{id, context, final}` straight from the core rows and chunks them. The same
-chunks go into all four model folders.
+chunks go into every requested model folder.
 
 An **off-voice draft** carries the same substance, facts, and numbers as the
 `final`, but is clearly *not yet in voice*: generic, too long, too formal, too
 hype, or the wrong angle. The `final` is the voice exemplar to deviate *from*.
-Direction is kept light so the four models diverge.
+Direction is kept light so different models diverge.
 
 ### Handoff structure
 
-This mirrors the proven `gemini/` pattern (see `gemini/README.md`): many input
-chunks per folder, **one sub-agent per chunk**, each owning one output file. It
-supersedes the old `gemini/` handoff, which is kept only as reference.
+This mirrors the proven folder handoff pattern: many input chunks per folder,
+**one worker per chunk**, each owning one output file.
 
 ```
 data_prep/generation-{date}/
   README.md
-  codex/    instruction.md  inputs/*.input.jsonl  outputs/*.output.jsonl   # Codex (GPT-5.5)
-  gemini/   ...                                                            # Gemini 3.1
-  sonnet/   ...                                                            # Claude Sonnet
-  opus/     ...                                                            # Claude Opus
+  codex/                    instruction.md  inputs/*.input.jsonl  outputs/*.output.jsonl
+  gemma-4-12b-coder-fable5-composer2.5-v1/  ...
+  qwen3-8b-mlx/             ...
 ```
 
-- `instruction.md` is **identical** in all four folders; the folder name signals
-  which model runs there.
-- The human opens a model folder and runs that model's agent. It fans out one
-  sub-agent per `inputs/*.input.jsonl` chunk; each sub-agent writes exactly one
+- `instruction.md` is **identical** in all folders; the folder name signals which
+  model or runner config runs there.
+- Manual mode: a human opens a model folder and runs that model's agent. It fans
+  out one worker per `inputs/*.input.jsonl` chunk; each worker writes exactly one
   `outputs/<chunk>.output.jsonl` and never cross-writes another worker's file.
+- Automated mode: configure a local draft model in
+  `data_prep/draft_models.json`. List configured aliases with:
+
+  ```bash
+  make draft-models
+  ```
+
+  Then run the Makefile helper:
+
+  ```bash
+  make draft-generation \
+    MODEL=gemma-4-12b-coder-fable5-composer2.5-v1 \
+    GENERATION_DATE=2026-06-28 \
+    START=0 \
+    END=250
+  ```
+
+  `GENERATION_DATE` defaults to today when omitted. The helper validates `MODEL`
+  against `data_prep/draft_models.json`, runs `build_generation.py --date
+  <date> --models <model>`, then runs:
+
+  ```bash
+  .venv/bin/python data_prep/run_draft_generation.py \
+    --model gemma-4-12b-coder-fable5-composer2.5-v1 \
+    --generation-date 2026-06-28 \
+    --start 0 \
+    --end 250
+  ```
+
+  The runner validates exact ids, schema, non-empty drafts, and `draft != final`
+  before writing each output chunk. Existing outputs are not overwritten unless
+  `--overwrite` is passed.
+
+  By default, invalid rows fail the chunk so bad training data is not written.
+  For long local-model runs, pass `--invalid-row-action skip` to write valid rows
+  normally and quarantine rejected rows under `outputs/_invalid_rows/` for
+  manual review. The original input rows for rejected rows are also written under
+  `outputs/_retry_inputs/` for a second model pass.
+
+  If the provider responds with an empty chat message, the runner saves the full
+  response under `outputs/_raw_responses/` and exits with that path. Use
+  `--raw-response-dir <dir>` to capture every raw provider response during
+  debugging.
+
+  Thinking models may put all generated text into a provider-specific reasoning
+  field and never emit final JSONL, especially when `finish_reason` is `length`.
+  For providers that support it, retry with `--think off`.
+
+### Draft model config
+
+Automated draft generation reads `data_prep/draft_models.json`. Each key is both
+the model folder name and the `--model` value. `openai-compatible` entries call
+LM Studio, Ollama, or similar servers; `mlx` entries run through `mlx_lm`.
+
+```json
+{
+  "models": {
+    "gemma-4-12b-coder-fable5-composer2.5-v1": {
+      "backend": "openai-compatible",
+      "provider": "LM Studio (local)",
+      "base_url": "http://localhost:1234/v1",
+      "model": "gemma-4-12b-coder-fable5-composer2.5-v1",
+      "temperature": 0.8,
+      "max_tokens": 220
+    }
+  }
+}
+```
+
+LM Studio defaults to `http://localhost:1234/v1`; Ollama defaults to
+`http://localhost:11434/v1`. For ad hoc models that are not in the config:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma3:27b \
+  --provider ollama \
+  --base-url http://laforge.local:11434/v1 \
+  --generation-date 2026-06-28 \
+  --start 0 \
+  --end 10
+```
+
+For MLX:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model qwen3-8b-mlx \
+  --generation-date 2026-06-28 \
+  --start 0 \
+  --end 10
+```
 
 Schemas:
 

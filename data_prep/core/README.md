@@ -8,13 +8,15 @@ This is **step 1** of the 3-step data-prep flow:
 
 1. **Build the core set** — curate seeds into the two files below.
 2. **Build the generation folder** — derive `data_prep/generation-{date}/` from the core set, where
-   4 models generate off-voice drafts. (See `../README.md`.)
+   configured models generate off-voice drafts. (See `../README.md`.)
 3. **Build triplets** — merge core seeds and generated drafts into
    `landing_zone/triplets.jsonl`.
 
 ## The two files
 
 Seeds are split by the one distinction that matters downstream — **does a real draft already exist?**
+The core set itself is model-agnostic; model-specific variation is introduced only
+in the generation folders.
 
 | File | Holds | Row schema |
 | --- | --- | --- |

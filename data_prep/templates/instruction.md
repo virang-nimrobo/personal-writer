@@ -7,9 +7,9 @@ The `final` is already written — it is the real, gold piece in the user's voic
 the **rough, off-voice DRAFT** that the writer would have turned into that final. You are working
 backwards from the answer.
 
-This folder is one of four (`codex/`, `gemini/`, `sonnet/`, `opus/`). The instructions are identical;
-the folder name tells you which model should run here. Run **one sub-agent per input chunk** so the
-four models each produce their own diverse drafts.
+The folder name tells you which model or runner config should run here. The
+instructions are identical across model folders. Run **one worker per input
+chunk** so each configured model produces its own diverse drafts.
 
 ## What you produce
 

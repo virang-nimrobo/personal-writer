@@ -143,7 +143,8 @@ Useful options:
 
 ```bash
 .venv/bin/python data_prep/build_generation.py --date 2026-06-29 --chunk-size 10
-.venv/bin/python data_prep/build_generation.py --models codex sonnet opus
+.venv/bin/python data_prep/build_generation.py \
+  --models codex gemma-4-12b-coder-fable5-composer2.5-v1 qwen3-8b-mlx
 ```
 
 This creates:
@@ -159,11 +160,132 @@ data_prep/generation-YYYY-MM-DD/
   opus/
 ```
 
-Open each model folder and have that model's agent fill
+Model names are folder/config aliases. The default set is still
+`codex gemini sonnet opus`, but you can add any model folder name. For local
+OpenAI-compatible or MLX providers, configure aliases in:
+
+```text
+data_prep/draft_models.json
+```
+
+That file contains OpenAI-compatible provider settings for examples such as
+Gemma via Ollama or LM Studio, plus MLX-backed local models.
+
+To list configured local aliases:
+
+```bash
+make draft-models
+```
+
+Manual workflow: open each model folder and have that model's agent fill
 `outputs/*.output.jsonl`. Each output row must contain only `id` and `draft`:
 
 ```json
 {"id": "tweet:0001", "draft": "A plausible but off-voice draft with the same facts as the final."}
+```
+
+Automated local-model workflow: run the Makefile helper with a configured alias:
+
+```bash
+make draft-generation \
+  MODEL=gemma-4-12b-coder-fable5-composer2.5-v1 \
+  START=0 \
+  END=10
+```
+
+By default, `GENERATION_DATE` is today. To rerun or backfill a specific dated
+folder, pass it explicitly:
+
+```bash
+make draft-generation \
+  MODEL=gemma-4-12b-coder-fable5-composer2.5-v1 \
+  GENERATION_DATE=2026-06-29 \
+  START=0 \
+  END=10
+```
+
+The helper validates `MODEL` against `data_prep/draft_models.json`, scaffolds
+`data_prep/generation-<date>/` for that model, then runs the draft generator:
+
+```bash
+.venv/bin/python data_prep/build_generation.py \
+  --date 2026-06-29 \
+  --models gemma-4-12b-coder-fable5-composer2.5-v1
+
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma-4-12b-coder-fable5-composer2.5-v1 \
+  --generation-date 2026-06-29 \
+  --start 0 \
+  --end 10
+```
+
+The runner writes `outputs/<chunk>.output.jsonl`, preserves input ids/order, and
+fails fast on invalid output instead of writing bad training data.
+
+For long local-model runs, you can quarantine bad rows instead of stopping the
+whole run. Valid rows are written normally; invalid rows go to
+`outputs/_invalid_rows/<chunk>.output.invalid.jsonl` for manual review or a
+second pass. The original input rows for those rejected rows are also written to
+`outputs/_retry_inputs/<chunk>.input.retry.jsonl`:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma4-26b \
+  --generation-date 2026-06-30 \
+  --start 25 \
+  --end 2500 \
+  --invalid-row-action skip \
+  --overwrite
+```
+
+If a local server returns an empty chat message, the runner saves the full raw
+response under `outputs/_raw_responses/` and exits with that path. To save raw
+responses for every chunk while debugging a provider, pass `--raw-response-dir`:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma4-26b \
+  --generation-date 2026-06-30 \
+  --start 0 \
+  --end 0 \
+  --raw-response-dir data_prep/debug/raw-responses
+```
+
+For thinking models that spend the whole completion budget in reasoning and
+return empty content, disable thinking when the provider supports it:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma4-26b \
+  --generation-date 2026-06-30 \
+  --start 0 \
+  --end 0 \
+  --think off \
+  --max-tokens 2500 \
+  --overwrite
+```
+
+LM Studio defaults to `http://localhost:1234/v1`; Ollama defaults to
+`http://localhost:11434/v1`. Use `--base-url` for another machine:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model gemma3:27b \
+  --provider ollama \
+  --base-url http://laforge.local:11434/v1 \
+  --generation-date 2026-06-29 \
+  --start 0 \
+  --end 10
+```
+
+For an MLX model:
+
+```bash
+.venv/bin/python data_prep/run_draft_generation.py \
+  --model qwen3-8b-mlx \
+  --generation-date 2026-06-29 \
+  --start 0 \
+  --end 10
 ```
 
 ## Stage 3: Build Triplets
