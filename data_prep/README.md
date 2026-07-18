@@ -32,6 +32,15 @@ Any user can build training data from this folder in three steps:
 3. **Build triplets** — run `build_triplets.py` to merge core seeds + generated
    drafts into the unified `landing_zone/triplets.jsonl`. See *Build triplets* below.
 
+For a Twitter/X archive, drop `tweets.js` or `tweet.js` into `data/raw/`, then run:
+
+```bash
+make import-twitter
+```
+
+This writes posted tweets into `core/no_draft.jsonl` because the archive contains
+final text but not the rough drafts that led to it.
+
 ## The data model
 
 Every training row is `{context, draft, final}`. The `final` is always the real

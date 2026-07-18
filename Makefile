@@ -1,4 +1,4 @@
-.PHONY: install venv smoke train infer eval promote harvest ui clean
+.PHONY: install venv import-twitter smoke train infer eval promote harvest ui clean
 
 # use the project venv if present, else system python3
 PY := $(shell [ -x .venv/bin/python ] && echo .venv/bin/python || echo python3)
@@ -14,6 +14,9 @@ install: venv
 # --- training ---
 # Data prep now lives in data_prep/ (fetch_x_core -> build_generation ->
 # build_triplets -> landing_zone/triplets.jsonl); `train` consumes that file.
+
+import-twitter:                # Twitter/X archive -> data_prep/core/no_draft.jsonl
+	$(PY) data_prep/import_twitter_archive.py
 
 smoke:                        # tiny end-to-end run: validates the chain + that BASE_MODEL trains/loads
 	$(PY) scripts/05_build_dataset.py
