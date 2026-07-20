@@ -3,9 +3,9 @@ name: writer-model-edit
 description: Use this skill when the user wants to edit/rewrite a draft into Virang's voice with the local fine-tuned writer model — "run the writer model", "edit this tweet/reply", "turn this draft into the final", "writer-model-edit". Turns {context, draft} into a final piece.
 metadata:
   author: nimrobo-ai
-  version: "1.0"
-compatibility: Requires the writer-model repo's .venv with `writer-model-edit` on PATH and a promoted adapter at out/editor-latest (run `make promote` once).
-allowed-tools: Read, Write, Bash(writer-model-edit:*)
+  version: "1.1"
+compatibility: Requires the writer-model repo's .venv and a local adapter. Editable install exposes `writer-model-edit` and `writer-model-studio`; otherwise use `.venv/bin/python -m writer_model.cli` / `.venv/bin/python -m writer_model.studio`. Pass `--adapter out/editor-latest` for the promoted champion.
+allowed-tools: Read, Write, Bash(writer-model-edit:*), Bash(writer-model-studio:*), Bash(.venv/bin/python -m writer_model.cli:*), Bash(.venv/bin/python -m writer_model.studio:*)
 ---
 
 # writer-model-edit
@@ -18,6 +18,15 @@ the model owns the edit — voice, structure, final wording.**
 
 The user has a rough/off-voice draft and wants it rewritten into their voice, or
 asks to run the writer model on something.
+
+Choose the path by job shape:
+
+- **One-off edit** — run `writer-model-edit` or `.venv/bin/python -m writer_model.cli`.
+- **Repeated/batch edits** — use the Python API and keep one `WriterEditor`
+  loaded.
+- **Interactive comparison** — launch `writer-model-studio`.
+- **New training data / retrain loop** — use the Data Prep workflow, then train,
+  evaluate, and promote.
 
 ## The input contract (get this right)
 
@@ -52,8 +61,73 @@ writer-model-edit --context "Write an original tweet. Topic: shipping fast" \
 echo '{"context":"…","draft":"…"}' | writer-model-edit --stdin --json
 ```
 
-Useful flags: `-n N` (generate N candidates), `--temp 0.7`, `--max-tokens 160`,
-`--json` (print the full result instead of just the final text).
+Without editable install:
+
+```bash
+.venv/bin/python -m writer_model.cli --context-file context.md --draft-file draft.md
+```
+
+Useful generation flags:
+
+- `-n N` — generate N candidates. Candidate 1 is the stable/default choice.
+- `--temp 0.7` — sampling temperature for exploratory candidates.
+- `--max-tokens 160` — output budget.
+- `--json` — print the full `EditResult` instead of just the final text.
+- `--adapter out/editor-latest` — use the promoted champion adapter.
+- `--base-model ...` — override the configured base model.
+- `--no-log` — suppress usage logging for throwaway calls.
+
+Useful provenance/logging flags:
+
+- `--source`, `--run-id`, `--artifact-type` — tag where the call came from.
+- `--metadata-json '{"key":"value"}'` — attach structured metadata.
+- `--usage-path /tmp/usage.jsonl` — override the usage log path.
+- `--feedback-path /tmp/feedback.jsonl` — override the feedback log path.
+
+## Efficient repeated calls
+
+For batch or tool integration work, do not start the CLI for every item. Load the
+model once:
+
+```python
+from writer_model.api import WriterEditor
+
+editor = WriterEditor(adapter_path="out/editor-latest")
+editor.load()
+
+result = editor.edit(
+    context="Write a reply. Parent: small models are too limited.",
+    draft="They are limited, but useful for narrow editing jobs.",
+    n=2,
+    temp=0.8,
+    source="local-script",
+    metadata={"thread": "demo"},
+)
+
+print(result.chosen_output)
+```
+
+For a single in-process call, `from writer_model.api import edit` is fine. For
+many calls, `WriterEditor` is faster because it keeps the model and tokenizer
+loaded.
+
+## Browser studio
+
+For interactive drafting, launch the studio:
+
+```bash
+writer-model-studio --adapter out/editor-latest --port 7860 --no-open
+```
+
+Without editable install:
+
+```bash
+.venv/bin/python -m writer_model.studio --adapter out/editor-latest --port 7860 --no-open
+```
+
+Open `http://localhost:7860`, paste `context` and `draft`, choose `n` and
+`temp`, then copy the best candidate. Studio calls log usage with
+`source="studio"`.
 
 ## Record feedback (feeds the next training pass)
 
@@ -71,9 +145,66 @@ writer-model-edit --context-file context.md --draft-file draft.md \
 writer-model-edit --context-file context.md --draft-file draft.md --feedback rejected
 ```
 
+Notes:
+
+- `--feedback accepted` uses the chosen output when no `--final-used` value is
+  provided.
+- `--feedback edited` requires `--final-used` or `--final-used-file`.
+- Feedback rows include provenance fields, metadata, all outputs, the chosen
+  output, and the final text the user actually used.
+
+## Data Prep and retraining
+
+When usage/feedback or new examples should improve the model, keep the skill's
+job as orchestration and use the repo docs for details:
+
+```bash
+make draft-models
+
+make draft-generation \
+  MODEL=gemma-4-12b-coder-fable5-composer2.5-v1 \
+  GENERATION_DATE=2026-06-29 \
+  START=0 \
+  END=10
+
+.venv/bin/python data_prep/build_triplets.py
+make train
+make eval
+make promote
+```
+
+Operational pointers:
+
+- Core seed data lives under `data_prep/core/`.
+- Generated draft rounds live under `data_prep/generation-YYYY-MM-DD/`.
+- `data_prep/build_triplets.py` rebuilds `landing_zone/triplets.jsonl`.
+- `make promote` updates `out/editor-latest` only after the candidate passes the
+  promotion gate.
+
+For long local draft-generation runs:
+
+- Use `--invalid-row-action skip` to quarantine bad rows instead of stopping the
+  whole run.
+- Use `--raw-response-dir ...` when debugging provider responses.
+- Use `--think off` for thinking models that return empty content because all
+  budget went to reasoning.
+
 ## Output & logging
 
 - Default prints just the final text; `--json` prints the full `EditResult`
   (all candidates, chosen output, adapter, metadata).
 - Every call appends to `data/usage/usage.jsonl`; feedback appends to
   `data/feedback/feedback.jsonl`. These feed the Data Prep → retrain loop.
+
+## Troubleshooting
+
+- `writer-model-edit: command not found` — run `.venv/bin/python -m writer_model.cli`
+  or install the repo editable with `.venv/bin/python -m pip install -e .`.
+- `adapter not found` — pass `--adapter out/editor-latest`, train/promote a
+  candidate, or use the configured candidate adapter if that is what you intend.
+- Repeated calls are slow — switch from the CLI to `WriterEditor`.
+- Output invents facts — fix the `context` and `draft`; the model may only use
+  facts, numbers, and links present there.
+- Draft generation writes bad local-model rows — rerun with
+  `--invalid-row-action skip`, inspect `_invalid_rows/` and `_retry_inputs/`,
+  and use `--raw-response-dir` for provider debugging.

@@ -14,6 +14,9 @@ data/
 landing_zone/
 gemini/
 backups/
+**/context.md
+**/draft.md
+data_prep/generation*
 
 # raw scraped/personal content anywhere in the tree
 **/.raw/

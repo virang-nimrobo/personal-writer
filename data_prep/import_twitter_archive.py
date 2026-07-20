@@ -7,11 +7,16 @@ Reads data/raw/tweets.js or data/raw/tweet.js and writes:
 
 The archive has only posted text, not the rough drafts that produced it, so every
 imported row is a no-draft seed. Downstream generation creates off-voice drafts.
+
+Optionally, this can also create deterministic draft-generation output files for
+an existing data_prep/generation-*/<model>/inputs directory:
+  data_prep/generation-*/<model>/outputs/*.output.jsonl   {id, draft}
 """
 import argparse
 import json
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -24,6 +29,7 @@ from scripts._common import write_jsonl  # noqa: E402
 CORE = HERE / "core"
 NO_DRAFT = CORE / "no_draft.jsonl"
 WITH_DRAFT = CORE / "with_draft.jsonl"
+DEFAULT_MODEL = "codex"
 
 RT_PREFIX = re.compile(r"^RT @\w+:")
 MENTION_PREFIX = re.compile(r"^@\w+\b")
@@ -32,6 +38,15 @@ MENTION_PREFIX = re.compile(r"^@\w+\b")
 def clean_text(value):
     text = str(value or "").replace("\r\n", "\n").strip()
     return re.sub(r"[ \t]+", " ", text)
+
+
+def one_line(text):
+    text = str(text or "").replace("\r\n", "\n").strip()
+    text = re.sub(r"\n{2,}", " ", text)
+    text = re.sub(r"\n+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\.\s*\.", ".", text)
+    return text.strip()
 
 
 def find_archive_file(raw_dir):
@@ -94,6 +109,79 @@ def seed_kind_and_context(text):
     return "tweet", "Write an original tweet."
 
 
+def split_handles(text):
+    handles = []
+    rest = text.strip()
+    while True:
+        match = re.match(r"^(@[A-Za-z0-9_]+)\s+", rest)
+        if not match:
+            break
+        handles.append(match.group(1))
+        rest = rest[match.end():].strip()
+    return " ".join(handles), rest
+
+
+def soften(text):
+    replacements = [
+        (r"\bcan't\b", "cannot"),
+        (r"\bdon't\b", "do not"),
+        (r"\bdoesn't\b", "does not"),
+        (r"\bwon't\b", "will not"),
+        (r"\bit's\b", "it is"),
+        (r"\bthat's\b", "that is"),
+        (r"\byou're\b", "you are"),
+        (r"\bI'm\b", "I am"),
+        (r"\bI've\b", "I have"),
+        (r"\bdoesn’t\b", "does not"),
+        (r"\bdon’t\b", "do not"),
+        (r"\bcan’t\b", "cannot"),
+        (r"\byou’re\b", "you are"),
+        (r"\bIt’s\b", "It is"),
+        (r"\bThey're\b", "They are"),
+    ]
+    out = text
+    for pattern, repl in replacements:
+        out = re.sub(pattern, repl, out, flags=re.IGNORECASE)
+    return out
+
+
+def draft_for(row, variant):
+    final = one_line(row["final"])
+    handles, body = split_handles(final)
+    body = soften(body)
+
+    if not body:
+        body = final
+
+    if len(body) < 90:
+        templates = [
+            "I think the main point is that {body}",
+            "Basically, {body}",
+            "The way I would say it is: {body}",
+            "My rough take is that {body}",
+        ]
+    elif "?" in body:
+        templates = [
+            "I would frame the question this way: {body}",
+            "The practical question here is: {body}",
+            "A clearer way to ask this is: {body}",
+            "The issue I am trying to raise is: {body}",
+        ]
+    else:
+        templates = [
+            "The point I am trying to make is that {body}",
+            "A more explicit version would be: {body}",
+            "I think this is mainly about the fact that {body}",
+            "In plain terms, {body}",
+        ]
+
+    draft = templates[variant % len(templates)].format(body=body)
+    draft = one_line(draft)
+    if handles:
+        draft = f"{handles} {draft}"
+    return draft
+
+
 def build_rows(tweets, *, include_retweets, include_empty):
     rows = []
     seen = set()
@@ -133,11 +221,81 @@ def build_rows(tweets, *, include_retweets, include_empty):
     return rows, skipped
 
 
+def read_jsonl(path):
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def resolve_generation_dir(args):
+    if args.generation_dir:
+        return args.generation_dir
+    return HERE / f"generation-{args.generation_date}"
+
+
+def input_indexes(inputs_dir):
+    indexes = []
+    for path in sorted(inputs_dir.glob("*.input.jsonl")):
+        try:
+            indexes.append(int(path.stem.split(".")[0]))
+        except ValueError:
+            continue
+    return indexes
+
+
+def write_draft_outputs(args):
+    gen_dir = resolve_generation_dir(args)
+    model_dir = gen_dir / args.model
+    inputs_dir = model_dir / "inputs"
+    outputs_dir = model_dir / "outputs"
+
+    if not inputs_dir.exists():
+        sys.exit(
+            f"missing generation inputs: {inputs_dir} "
+            "(run data_prep/build_generation.py first)"
+        )
+
+    indexes = input_indexes(inputs_dir)
+    if not indexes:
+        sys.exit(f"no input chunks found under {inputs_dir}")
+
+    start = args.output_start if args.output_start is not None else min(indexes)
+    end = args.output_end if args.output_end is not None else max(indexes)
+    selected = [idx for idx in indexes if start <= idx <= end]
+    if not selected:
+        sys.exit(f"no input chunks found in range {start:03d}..{end:03d}")
+
+    written = 0
+    rows_written = 0
+    if not args.dry_run:
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx in selected:
+        input_path = inputs_dir / f"{idx:03d}.input.jsonl"
+        output_path = outputs_dir / f"{idx:03d}.output.jsonl"
+        rows = read_jsonl(input_path)
+        output_rows = [
+            {"id": row["id"], "draft": draft_for(row, idx + pos)}
+            for pos, row in enumerate(rows)
+        ]
+        if not args.dry_run:
+            write_jsonl(output_path, output_rows)
+        written += 1
+        rows_written += len(output_rows)
+
+    verb = "would write" if args.dry_run else "wrote"
+    print(f"{verb} {written} output files, {rows_written} draft rows -> {outputs_dir}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--raw-dir", type=Path, default=C.RAW)
     ap.add_argument("--include-retweets", action="store_true")
     ap.add_argument("--include-empty", action="store_true")
+    ap.add_argument("--create-draft-outputs", action="store_true")
+    ap.add_argument("--generation-date", default=date.today().isoformat())
+    ap.add_argument("--generation-dir", type=Path, default=None)
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--output-start", type=int, default=None)
+    ap.add_argument("--output-end", type=int, default=None)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -160,6 +318,9 @@ def main():
 
     print(f"source: {archive_file}")
     print("skipped: " + ", ".join(f"{key}={value}" for key, value in skipped.items()))
+
+    if args.create_draft_outputs:
+        write_draft_outputs(args)
 
 
 if __name__ == "__main__":

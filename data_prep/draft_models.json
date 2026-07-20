@@ -1,0 +1,55 @@
+{
+  "models": {
+    "gemma4-26b": {
+      "provider": "Ollama (mybigserver)",
+      "base_url": "http://laforge.local:11434/v1",
+      "model": "gemma4:26b",
+      "temperature": 0.8,
+      "max_tokens": 8500
+    },
+    "gemma3-27b-ollama-local": {
+      "provider": "Ollama (local)",
+      "base_url": "http://localhost:11434/v1",
+      "model": "gemma3:27b",
+      "temperature": 0.8,
+      "max_tokens": 2000
+    },
+    "gemma-3-27b-it-lmstudio": {
+      "backend": "openai-compatible",
+      "provider": "LM Studio (local)",
+      "base_url": "http://localhost:1234/v1",
+      "model": "gemma-3-27b-it",
+      "temperature": 0.8,
+      "max_tokens": 2000
+    },
+    "gemma-4-12b-coder-fable5-composer2.5-v1": {
+      "backend": "openai-compatible",
+      "provider": "LM Studio (local)",
+      "base_url": "http://localhost:1234/v1",
+      "model": "gemma-4-12b-coder-fable5-composer2.5-v1",
+      "temperature": 0.8,
+      "max_tokens": 2000
+    },
+    "qwen3-8b-mlx": {
+      "backend": "mlx",
+      "provider": "MLX local",
+      "model": "mlx-community/Qwen3-8B-4bit",
+      "temperature": 0.8,
+      "max_tokens": 2000
+    },
+      "gemma4-12b-mlx": {
+          "backend": "mlx",
+          "provider": "MLX local",
+          "model": "mlx-community/gemma-4-12b-coder-fable5-composer2.5-8bit",
+          "temperature": 0.9,
+          "max_tokens": 4000
+      },
+      "glm-4.7-mlx": {
+          "backend": "mlx",
+          "provider": "MLX local",
+          "model": "mlx-community/GLM-4.7-Flash-4bit",
+          "temperature": 0.9,
+          "max_tokens": 4000
+      }
+  }
+}

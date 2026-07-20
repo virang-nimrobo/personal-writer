@@ -15,17 +15,36 @@ def load_scorecard(adapter):
     return json.loads(path.read_text())
 
 
-def better(candidate, champion):
+def promotion_decision(candidate, champion):
     if champion is None:
-        return True
+        return True, "no champion scorecard"
     if candidate["gate_pass_rate"] < champion["gate_pass_rate"]:
-        return False
+        return (
+            False,
+            "gate_pass_rate regressed: "
+            f"candidate={candidate['gate_pass_rate']} "
+            f"champion={champion['gate_pass_rate']}",
+        )
     for key in ("voice_winrate_vs_draft", "similarity"):
         cand_val = candidate.get(key)
         champ_val = champion.get(key)
         if cand_val is not None and champ_val is not None and cand_val != champ_val:
-            return cand_val > champ_val
-    return candidate["gate_pass_rate"] > champion["gate_pass_rate"]
+            if cand_val > champ_val:
+                return True, f"{key} improved: candidate={cand_val} champion={champ_val}"
+            return False, f"{key} regressed: candidate={cand_val} champion={champ_val}"
+    if candidate["gate_pass_rate"] > champion["gate_pass_rate"]:
+        return (
+            True,
+            "gate_pass_rate improved: "
+            f"candidate={candidate['gate_pass_rate']} "
+            f"champion={champion['gate_pass_rate']}",
+        )
+    return False, "no comparable metric improved"
+
+
+def better(candidate, champion):
+    promoted, _ = promotion_decision(candidate, champion)
+    return promoted
 
 
 def main():
@@ -40,16 +59,18 @@ def main():
     candidate = load_scorecard(candidate_path)
     champion = load_scorecard(champion_path) if (champion_path / "scorecard.json").exists() else None
 
-    if not better(candidate, champion):
+    promoted, reason = promotion_decision(candidate, champion)
+    if not promoted:
         champ_gate = champion and champion.get("gate_pass_rate")
         print(
             "kept champion: "
             f"candidate gate={candidate.get('gate_pass_rate')} "
-            f"champion gate={champ_gate}"
+            f"champion gate={champ_gate}; "
+            f"{reason}"
         )
-        return 1
+        return 0
 
-    print(f"promote {candidate_path} -> {champion_path}")
+    print(f"promote {candidate_path} -> {champion_path}; {reason}")
     if args.dry_run:
         return 0
 
